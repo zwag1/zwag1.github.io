@@ -1,0 +1,953 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/brython@3.13.1/brython.min.js"></script>
+<script> typeof brython === "undefined" && document.write('<script src="brython.min.js">\x3C/script>')</script>
+
+<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/brython@3.13.1/brython_stdlib.js"></script>
+<script> typeof __BRYTHON__.use_VFS === "undefined" && document.write('<script src="brython_stdlib.js">\x3C/script>')</script>
+
+<script type="text/javascript">
+function __brython_pre_then_code() {
+  brython({debug:1, ids:["brythonpre"]});
+}
+</script>
+</head>
+
+<body onload="__brython_pre_then_code()">
+<!-- Import pixi, with fallback to a local copy -->
+<script
+src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/8.9.0/pixi.min.js">
+</script>
+<script>typeof PIXI === "undefined" && 
+    document.write('<script src="pixi.min.js">\x3C/script>')</script>
+
+<!-- Also import pixi sound, with fallback to a local copy -->
+<script
+src="https://unpkg.com/@pixi/sound@6.0.1/dist/pixi-sound.js">
+</script>
+<script>typeof PIXI.sound === "undefined" && 
+    document.write('<script src="pixi-sound.js">\x3C/script>')</script>
+
+<style>
+body { margin: 0;
+       padding: 0;
+       width: 100%;
+       height: 100%;
+       overflow: hidden;
+       background-color: #aaaaaa;
+     }
+</style>
+
+<script type="text/python" id="brythonpre">
+from browser import document, window
+
+import sys
+class __ErrorReporter:
+    def __init__(self):
+        self.errdiv = None
+    def write(self, msg):
+        if self.errdiv is None:
+            self.errdiv = document.createElement("div")
+            self.errdiv.style = "white-space: pre-wrap; font-family: monospace; color:red"
+            document.body.insertBefore(self.errdiv, document.body.firstChild)
+        self.errdiv.textContent += ("\n" + msg)
+sys.stderr = __ErrorReporter()
+
+# Load modules - use runPythonSource as it is synchronous
+for module in ['__pwe_pixi', '__pwe_pixisound', '__pwe_keyboard', '__pwe_isaacfunctions']:
+    __BRYTHON__.runPythonSource(document[module].text, module.replace('__pwe_', ''))
+
+# Now run main code
+window.brython({'debug': 1, 'ids': ["pythoncode"]})
+</script>
+
+<script type="text/python" id="__pwe_pixi">
+"""Wraps pixi interface to act more like pygame."""
+
+import math
+from browser import window, document, aio, console, bind
+
+# Global state
+app = None
+target_width, target_height = 1920, 1080 # Virtual screen width
+drawing_container = None
+graphics = None
+update = None
+draw = None
+sprites = {}
+textures = {}
+subcontainer = None
+
+
+def run(update_fn, draw_fn, background_color, width, height, spriteinfo=None):
+    """Start the game loop with the given update and draw functions."""
+    global update, draw
+    update = update_fn
+    draw = draw_fn
+    # Lightweight async wrapper
+    aio.run(setup_and_run(background_color, width, height, spriteinfo))
+
+
+def _clear(ticker):
+    global drawing_container, graphics
+    # Remove all items that aren't the line graphics
+    for child in drawing_container.children:
+        if child != graphics:
+            child.destroy()
+    # Clear the drawn graphics container
+    graphics.clear()
+
+    
+def update_then_draw(ticker):
+    global update, draw
+    # Call the user's update function with a delta time argument
+    update(ticker.deltaMS)
+    # Then call the user's draw function, which will add items
+    # to the drawing container (it will actually get rendered
+    # later by Pixi)
+    draw(ticker.deltaMS)
+
+    
+async def setup_and_run(background_color, width, height, spritesinfo):
+    global app, drawing_container, graphics, target_height, target_width
+    target_width = width
+    target_height = height
+    app = window.PIXI.Application.new()
+    await app.init({
+        # 'backgroundAlpha': 0, # Transparent background
+        'background': background_color, 
+        'width': width,
+        'height': height,
+        'antialias': True,  # Enable antialiasing
+        'autoDensity': True,
+        'resolution': window.devicePixelRatio or 1,  # Handle high DPI displays
+    })
+
+    if spritesinfo:
+        for basepath, imgsize, regions in spritesinfo:
+            await addsprites(basepath, imgsize, regions)
+    
+    document.body.appendChild(app.canvas)
+    # Create a top level container for things that will be
+    # added / cleared every tick
+    drawing_container = window.PIXI.Container.new()
+    app.stage.addChild(drawing_container)
+    # For simple graphics, can group all of these calls into
+    # one Graphics object
+    graphics = window.PIXI.Graphics.new()
+    drawing_container.addChild(graphics)
+    # TODO: load assets in async
+    app.ticker.add(_clear)
+    app.ticker.add(update_then_draw)
+    resize()
+
+
+@bind(window, 'resize')
+def resize(evt=None):
+    "Resize the canvas to fill the screen while maintaining aspect ratio"
+    global target_width, target_height, app
+
+    # Get the window dimensions
+    window_width = window.innerWidth
+    window_height = window.innerHeight
+
+    # Use the smaller scale to ensure the canvas fits the screen
+    scale = min(window_width  / target_width,
+                window_height / target_height)
+
+    # Calculate the centered position
+    new_width = round(target_width * scale)
+    new_height = round(target_height * scale)
+    left = math.floor((window_width - new_width) / 2)
+    top = math.floor((window_height - new_height) / 2)
+
+    # Set the canvas display size (CSS pixels)
+    app.canvas.style.position = 'absolute';
+    app.canvas.style.width = f'{new_width}px'
+    app.canvas.style.height = f'{new_height}px'
+    app.canvas.style.left = f'{left}px'
+    app.canvas.style.top = f'{top}px'
+
+    # Update the renderer size (in logical pixels)
+    app.renderer.resize(target_width, target_height)
+
+
+async def addsprites(image_path, image_size, sprite_regions):
+    """Load sprites from a spritesheet.
+    
+    Args:
+        image_path (str): Path to the spritesheet image
+        image_size (tuple): Spritesheet image (w, h)
+        sprite_regions (dict): Dictionary mapping sprite names to their regions
+                               in the format (x, y, width, height)
+    """
+    global sprites, textures, spritesheets
+
+    # Create the object that is expected by spritesheet
+    spritedata = {
+        'frames': {},
+        'meta': {
+            'image': image_path,
+            'format': 'RGBA8888',
+            'size': {'w': image_size[0], 
+                     'h': image_size[1]},
+            'scale': 1}}
+    for name, region in sprite_regions.items():
+        spritedata['frames'][name] = {
+            'frame': {'x': region[0], 'y': region[1], 'w': region[2], 'h': region[3]},
+            'sourceSize': {'w': region[2], 'h': region[3]},
+            'spriteSourceSize': {'x': 0, 'y': 0, 'w': region[2], 'h': region[3]},
+            'anchor': {'x': 0.5, 'y': 0.5}}
+
+    console.log(spritedata)
+
+    base_texture = await window.PIXI.Assets.load(image_path)
+    spritesheet = window.PIXI.Spritesheet.new(base_texture, spritedata)
+    
+    # Create all the textures from the base spritesheet
+    await spritesheet.parse()
+
+    # Store a link to all textures in a global textures
+    for name in spritesheet.textures:
+        textures[name] = spritesheet.textures[name]
+        console.log(textures[name])
+
+
+def screen_center():
+    w, h = screen_dimensions()
+    return (w / 2, h / 2)
+
+
+def screen_dimensions():
+    return (target_width, target_height)
+    
+
+## The drawing functions
+
+class container:
+    """Container that works as a context manager. 
+    
+    Only for sprites, currently. 
+    Only single level.
+    Pivot is set to center so that rotation works.
+    """
+    def __init__(self, x, y, rotation_deg):
+        self.x = x
+        self.y = y
+        self.rotation_deg = rotation_deg
+
+    def __enter__(self):
+        global subcontainer, drawing_container
+        assert subcontainer is None, 'No support yet for nested containers'
+        subcontainer = window.PIXI.Container.new()
+        drawing_container.addChild(subcontainer)
+        return subcontainer
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        global subcontainer
+        subcontainer.x = self.x
+        subcontainer.y = self.y
+        #subcontainer.pivot.x = subcontainer.width / 2
+        #subcontainer.pivot.y = subcontainer.height / 2
+        subcontainer.angle = self.rotation_deg
+        subcontainer = None
+
+
+def draw_line(x1, y1, x2, y2, color='black', width=1):
+    """Draw a line from (x1,y1) to (x2,y2)"""
+    global graphics
+    graphics.moveTo(x1, y1)
+    graphics.lineTo(x2, y2)
+    graphics.stroke({'width': width, 'color': color})
+    
+
+def draw_circle(x, y, radius, color='black', filled=False, width=1):
+    """Draw a circle centered at (x,y)"""
+    global graphics
+    graphics.circle(x, y, radius)
+    if filled:
+        fillcolor = color if isinstance(filled, bool) else filled            
+        graphics.fill({'color': fillcolor})
+    graphics.stroke({'width': width, 'color': color})
+
+
+def draw_arc(x, y, radius, start_angle_deg, end_angle_deg, clockwise=True,
+            color='black', filled=False, width=1):
+    """Draw an arc centered at (x,y)"""
+    global graphics
+    deg_to_rad = 3.14159265358 / 180.0
+    graphics.arc(x, y, radius, 
+                 start_angle_deg * deg_to_rad, 
+                 end_angle_deg * deg_to_rad)
+    if filled:
+        fillcolor = color if isinstance(filled, bool) else filled            
+        graphics.fill({'color': fillcolor})
+    graphics.stroke({'width': width, 'color': color})
+
+
+def draw_rect(x, y, width, height, color='black', filled=False, linewidth=1):
+    """Draw a rectangle at (x,y)"""
+    global graphics
+    graphics.rect(x, y, width, height)
+    if filled:
+        fillcolor = color if isinstance(filled, bool) else filled            
+        graphics.fill({'color': fillcolor})
+    graphics.stroke({'width': linewidth, 'color': color})
+
+
+def draw_poly(pts, color, filled, linewidth):
+    pass
+
+
+def draw_text(text, x, y, color='black', font_size=12, font_family='Arial', 
+             centered=True, bold=False):
+    """Draw text at position (x,y)"""
+    global drawing_container
+    style = {
+        'fontFamily': font_family,
+        'fontSize': font_size,
+        'fill': color,
+        'fontWeight': 'bold' if bold else 'normal'
+    }
+    text_sprite = window.PIXI.Text.new(text, style)
+    if centered:
+        text_sprite.anchor.set(0.5, 0.5)
+    text_sprite.position.set(x, y)
+    drawing_container.addChild(text_sprite)
+    
+
+def draw_triangle(p1, p2, p3, color='black', width=1):
+    draw_line(*p1, *p2, color=color, width=width)
+    draw_line(*p2, *p3, color=color, width=width)
+    draw_line(*p3, *p1, color=color, width=width)
+
+
+def draw_sprite(name: str, x, y, scale=1.0, rotation_deg=None):
+    """Draw a sprite at the given position.
+    
+    Args:
+        name (str): Name of the sprite as defined in sprite_regions
+        x (float): X coordinate
+        y (float): Y coordinate
+        scale (float): Scale factor (default: 1.0)
+        rotation (float): Rotation in radians (optional)
+    """
+    global sprites, textures, app, drawing_container, subcontainer
+    
+    # For now, we draw a new sprite every frame - this does not take advantage
+    # of Pixi's full speed, but it aligns with our pygame approach
+    sprite = (window.PIXI.Sprite.new(textures[name]))
+
+    sprite.x = x
+    sprite.y = y
+    sprite.scale.set(scale, scale)
+    
+    if rotation_deg is not None:
+        sprite.angle = rotation_deg
+
+    if subcontainer is not None:
+        subcontainer.addChild(sprite)
+    else:
+        drawing_container.addChild(sprite)
+        
+
+
+</script>
+
+<script type="text/python" id="__pwe_pixisound">
+"""Very lightweight wrapper around pixi-sound.js.
+
+Note that you cannot immediately play sounds - you wait until after a user interaction.
+"""
+
+from browser import window
+
+
+def add(name: str, path_to_sound_file):
+    window.PIXI.sound.add(name, path_to_sound_file)
+
+
+def play(name: str, spritename: str | None = None):
+    window.PIXI.sound.context.paused = False # Always try to enable
+    if spritename is not None:
+        window.PIXI.sound.play(name, spritename)
+    else:
+        window.PIXI.sound.play(name)
+
+
+def addsprites(name, path_to_sound_file, name_to_start_end_map):
+    sprites = {name: {'start': start, 'end': end, 'loop': False} 
+               for name, (start, end) in name_to_start_end_map.items()}
+    
+    window.PIXI.sound.add(name, {
+        'url': path_to_sound_file,
+        'sprites': sprites})
+</script>
+
+<script type="text/python" id="__pwe_keyboard">
+"""Simple wrapper of key events so they are easier to handle in a game.
+
+After calling
+
+    import keyboard
+
+To check if a key has been pressed (once), such as the 'a' key, use:
+
+    if keyboard.pressed.a:
+        ...
+
+On each update loop, you then also need to call keyboard.pressed.clear().
+
+If you want to see if a key is down, use:
+
+    if keyboard.keydown.g:
+        ....
+
+In this case, do not call keyboard.keydown.clear()
+    
+Number keys are: n1, n2..., n9, n0
+
+Special keys are as follows:
+    space - spacebar
+    left - Left arrow
+    right - Right arrow
+"""
+
+from browser import document, bind
+
+class Bucket:
+    """Class that defaults to False on attribute access.
+    Otherwise allows easy assignment and clearing of all attributes.
+    """
+    def __init__(self):
+        self._mydata = dict()
+
+    def __getattr__(self, attr):
+        return self._mydata.get(attr, False)
+
+    def __setattr__(self, name, value):
+        # Special handling for our internal _mydata dictionary
+        if name == '_mydata':
+            super().__setattr__(name, value)
+        else:
+            self._mydata[name] = value
+
+    def clear(self):
+        self._mydata.clear()
+
+
+# Define the two data structures
+pressed = Bucket()
+keydown = Bucket()
+
+keymap = {' ': 'space',
+          ',': 'comma',
+          '.': 'period',
+          '/': 'slash',
+         }
+
+keycodemap = {39: 'right',
+              37: 'left'}
+
+
+def _mapevent(e):
+    if e.key.isalpha():
+        return e.key
+    elif e.key.isalnum():
+        return 'n' + e.key
+    elif e.key in keymap:
+        return keymap[e.key]
+    elif e.keyCode in keycodemap:
+        return keycodemap[e.keyCode]
+    return None
+
+
+@bind(document, 'keydown')
+def keyDownHandler(e):
+    global keydown
+    name = _mapevent(e)
+    if name is not None:
+        setattr(keydown, name, True)
+
+        
+@bind(document, 'keyup')
+def keyUpHandler(e):
+    global keydown
+    name = _mapevent(e)
+    if name is not None:
+        setattr(keydown, name, False)
+
+@bind(document, 'keypress')
+def keyPressHandler(e):
+    global pressed
+    name = _mapevent(e)
+    if name is not None:
+        setattr(pressed, name, True) 
+
+
+</script>
+
+<script type="text/python" id="__pwe_isaacfunctions">
+
+def lineintersect(x1,y1,x2,y2,x3,y3,x4,y4):
+    a = 0
+    b = 0
+    den = (y4-y3)*(x2-x1) - (x4-x3)*(y2-y1)
+    if den == 0:
+        if x1==x2:
+            if x1==x3:
+                return y1<=y3<=y2 or y1<=y4<=y2 or y3<=y1<=y4 or y3<=y2<=y4
+            else: 
+                return False
+        else:
+            if y1-x1*((y1-y2)/(x1-x2)) != y3-x3*(y3-y4/x3-x4):
+                return False
+            else:
+                return y1<=y3<=y2 or y1<=y4<=y2 or y3<=y1<=y4 or y3<=y2<=y4
+    b = ((y1-y3)*(x2-x1)+(x3-x1)*(y2-y1))/den
+    a = ((x3-x1)+b*(x4-x3))/(x2-x1)
+    return (0 < a < 1) and (0 < b < 1)
+
+            
+def test_lineintersect():
+    assert lineintersect(0, 0, 1, 1, 1, 0, 0, 1)
+    assert not lineintersect(0, 0, 0, 1, 1, 0, 1, 1) 
+    assert not lineintersect(0,0,1,1,1,0,2,1)
+    assert lineintersect(0,0,0,5,0,1,0,22)
+    assert not lineintersect(0,0,0,1,0,5,0,6)
+    assert not lineintersect(0,0,1,1,2,2,3,3)
+        
+    
+    
+</script>
+
+<script type="text/python" id="pythoncode">
+# Here we are showing the basics of a pygame-like framework that allows
+# sprites and sounds. 
+
+# One of the difficulties of working in a web browser
+# is that certain things are not allowed in certain situations. For example,
+# when running completely offline, your webpage can load javascript and images
+# from local files, but you're not allowed to load other types of files, like 
+# sound files.
+#
+# In this example, we show how to overcome these limitations.
+
+import random
+import math
+
+from browser import window
+
+import pixi
+import pixisound
+import keyboard
+import isaacfunctions as zak
+
+
+time_ms = 0
+actors = []
+landingzones = [] # x , y, length, (x and y for left side)
+terrainpts = []
+GRAVITY_PXPSS = 0.25
+terrainlines = []
+terrainpts = []
+landed = False
+stars = []
+
+# TODO: 
+
+#explode?
+
+class Landerexplode:
+    def __init__(self,x,y,vx,vy):
+        
+        
+        self.speed = 25
+        
+        self.x = x
+        
+        self.y = y
+        self.vx = vx
+        self.vy = -vy*0.7
+        self.elt = 0
+        self.vels = []
+        for i in range(12):
+            self.vels.append(random.triangular(0.5,3))
+
+    def draw(self):
+        w, h = pixi.screen_dimensions()
+        
+        pixi.draw_sprite('landerp1', self.x - self.elt/self.speed*self.vels[0] - 5.5, self.y - self.elt/self.speed*self.vels[1] - 6,1,self.elt*self.vels[2]/self.speed)
+        pixi.draw_sprite('landerp2', self.x + self.elt/self.speed*self.vels[3] + 5.5, self.y - self.elt/self.speed*self.vels[4] - 6,1,self.elt*self.vels[5]/self.speed)
+        pixi.draw_sprite('landerp3', self.x - self.elt/self.speed*self.vels[6] - 5.5, self.y + self.elt/self.speed*self.vels[7] + 6,1,self.elt*self.vels[8]/self.speed)
+        pixi.draw_sprite('landerp4', self.x + self.elt/self.speed*self.vels[9] + 5.5, self.y + self.elt/self.speed*self.vels[10]+ 6,1,self.elt*self.vels[11]/self.speed)
+        
+        for i in range(random.randint(3,10)):
+             pixi.draw_sprite(f'bottom_flame_{random.randint(1,2)}', self.x + random.randint(round(-self.elt/self.speed),round(self.elt/self.speed)), self.y + random.randint(round(-self.elt/self.speed),round(self.elt/self.speed)),random.randint(2,5),random.randint(0,360))
+            
+    def update(self,dt_ms):
+        self.elt += dt_ms
+        self.vy += GRAVITY_PXPSS * dt_ms / 1000.0
+        self.x += self.vx
+        self.y += self.vy
+        
+        return self.elt < 5000
+        
+            
+fuel = 3000
+score = 0 
+
+class Lander:
+    THRUST_PXPSS = 3*GRAVITY_PXPSS
+    ROTTHRUST_DPSS = 100
+    MAXIMPACT = .5
+    
+    def __init__(self, x, y):
+        global landed
+        self.angle_rad = 0.349066
+        self.textcol = 'white'
+        self.scoretimer = 1.0
+        global fuel 
+        self.x = x
+        self.y = y
+        landed = False
+        self.vx = random.triangular(-1,1)
+        self.vy = random.triangular(-1,0)
+        self.angle_deg = 20
+        self.angle_vel_dps = 0
+        self.thrusting = False
+        self.thrusting_left = False
+        self.thrusting_right = False
+
+    def update(self, dt_ms):
+        global landed,fuel,score,lzmaxwidth
+        w, h = pixi.screen_dimensions()
+        self.thrusting = False
+        self.thrusting_left = False
+        self.thrusting_right = False
+
+        # Events
+        rotation_acc_dpss = 0.0
+        if keyboard.keydown.a and fuel > 0 :
+            fuel -= 0.25 * round(60/(1000/dt_ms))
+            self.thrusting_right = True
+            rotation_acc_dpss = -self.ROTTHRUST_DPSS
+        elif keyboard.keydown.d and fuel > 0:
+            fuel -= 0.25 * round(60/(1000/dt_ms))
+            self.thrusting_left = True
+            rotation_acc_dpss = self.ROTTHRUST_DPSS
+ 
+        if keyboard.keydown.w and fuel > 0 :
+            self.thrusting = True
+            fuel -= 1 * round(60/(1000/dt_ms))
+            self.vy += self.THRUST_PXPSS * (-math.cos(self.angle_deg*math.pi/180)) * dt_ms / 1000.0
+            self.vx += self.THRUST_PXPSS * ( math.sin(self.angle_deg*math.pi/180)) * dt_ms / 1000.0
+        if self.x < 0:
+            self.x = w - 1
+        if self.x > w:
+            self.x = 1
+        # find lowest vertex of hitbox 
+        self.angle_rad = (self.angle_deg+45) *(math.pi/180)
+        
+
+        vertexes =  []
+        vertexes.append(( (14) * math.cos(-self.angle_rad        ), (14) * math.sin(-self.angle_rad        )))
+        vertexes.append(( (14) * math.cos(-self.angle_rad+1.5708 ), (14) * math.sin(-self.angle_rad+1.5708 )))
+        vertexes.append(( (14) * math.cos(-self.angle_rad+3.14159), (14) * math.sin(-self.angle_rad+3.14159)))
+        vertexes.append(( (14) * math.cos(-self.angle_rad+4.71239), (14) * math.sin(-self.angle_rad+4.71239)))
+        if self.angle_deg > 180: self.angle_deg = -180 +(self.angle_deg-180)
+        if self.angle_deg < -180: self.angle_deg = 180 -(self.angle_deg-180)
+
+        
+
+        self.lp = 0
+        for i in vertexes:
+            if i[1] > self.lp:
+                self.lp=i[1]
+        self.lp = -self.lp
+            
+            
+        # 'touchdown' code
+
+        for x in terrainlines:
+            if zak.lineintersect(self.x + vertexes[0][0],self.y + vertexes[0][1],self.x + vertexes[2][0],self.y + vertexes[2][1],x[0][0],x[0][1],x[1][0],x[1][1]):
+                actors.append(Landerexplode(self.x,self.y,self.vx,self.vy))
+                return False
+            if zak.lineintersect(self.x + vertexes[1][0],self.y + vertexes[1][1],self.x + vertexes[3][0],self.y + vertexes[3][1],x[0][0],x[0][1],x[1][0],x[1][1]):
+                actors.append(Landerexplode(self.x,self.y,self.vx,self.vy))
+                return False
+
+
+
+        
+
+        rot = lambda vy : 0 if vy > 0 else -50* vy
+        
+        for i in landingzones:
+            if self.y+-self.lp >= i[1] and self.y+-self.lp <=i[1] + 10 and self.x +10 > i[0] and self.x -10 < i[0] +i[2] and self.vy > 0 :
+                if math.sqrt(self.vx**2 + self.vy**2) > self.MAXIMPACT:
+                    actors.append(Landerexplode(self.x,self.y,self.vx,self.vy))
+                    return False
+                self.scoretimer -= dt_ms/500
+                if self.scoretimer <  0:
+                    landed = True
+                    score += lzmaxwidth - i[2]
+                    return False
+                    
+                self.vy *= -0.5
+                self.vx *= 0.5
+                self.angle_vel_dps *= 0.5
+                if self.angle_deg < 0 :
+                    self.angle_vel_dps += 15 + rot(self.vy)
+                if self.angle_deg > 0 :
+                    self.angle_vel_dps -= 15 + rot(self.vy)
+                if abs(self.angle_deg) < 1 and abs(self.angle_vel_dps) < 1: 
+                    self.angle_deg = 0
+                    self.angle_vel_dps = 0
+                if abs(self.x) < 1 and abs(self.vx) < 1: 
+                    self.x = 0
+                    self.vx = 0
+                if abs(self.y) < 1 and abs(self.vy) < 1: 
+                    self.y = 0
+                    self.vy = 0
+         
+                    
+                
+                    
+              
+        
+        if math.sqrt(self.vx**2 + self.vy**2) > self.MAXIMPACT:
+            self.textcol = 'orange'
+        else:
+            self.textcol = 'white'
+
+        # Update state
+        self.x += self.vx
+        self.y += self.vy
+        self.vy += GRAVITY_PXPSS * dt_ms / 1000.0 
+        self.angle_deg += self.angle_vel_dps * dt_ms / 1000.0
+        self.angle_vel_dps += rotation_acc_dpss * dt_ms / 1000.0
+        if self.angle_deg > 180: self.angle_deg = -180 +(self.angle_deg-180)
+        if self.angle_deg < -180: self.angle_deg = 180 -(self.angle_deg-180)
+
+        
+        if not(self.y - 20) < h: 
+            actors.append(Landerexplode(self.x,self.y,self.vx,self.vy))
+        return (self.y - 20) < h
+
+    def draw(self):
+        cx, cy = pixi.screen_center()
+        w, h = pixi.screen_dimensions()
+
+       
+
+        # pixi.draw_line(cx, cy-30, cx, cy + 30, color='white')
+        # pixi.draw_line(cx-30, cy, cx+30, cy, color='white')
+      
+        with pixi.container(self.x, self.y, self.angle_deg):
+            pixi.draw_sprite('lander', 0, 0)
+            if self.thrusting_left:     
+                pixi.draw_sprite(f'left_flame_{random.randint(1,2)}', -9.5, -4.5)
+            if self.thrusting_right:     
+                 pixi.draw_sprite(f'right_flame_{random.randint(1,2)}', 9.5, -4.5)
+            if self.thrusting:
+                pixi.draw_sprite(f'bottom_flame_{random.randint(1,2)}', 0, 10)
+
+    #   pixi.draw_sprite(f'landerp1', w/2, h/2)
+    #   pixi.draw_sprite(f'landerp2', w/2+11, h/2)
+    #   pixi.draw_sprite(f'landerp3', w/2+22, h/2)
+    #   pixi.draw_sprite(f'landerp4', w/2+33, h/2)
+        
+        
+        pixi.draw_text(f'Y: {self.y:.1f}', 50, 10, self.textcol, font_size=14, font_family='Arial')
+        pixi.draw_text(f'X: {self.x:.1f}', 50, 25, self.textcol, font_size=14, font_family='Arial')
+        pixi.draw_text(f'Angle: {round(self.angle_deg):.0f}', 50, 40, self.textcol, font_size=14, font_family='Arial')
+        pixi.draw_text(f'Y Velocity: {round(25*self.vy):}', w-50, 10, self.textcol, font_size=14, font_family='Arial')
+        pixi.draw_text(f'X Velocity: {round(25*self.vx):}', w-50, 25, self.textcol, font_size=14, font_family='Arial')
+        pixi.draw_text(f'Fuel: {(fuel/10):.0f}', 50, 55, self.textcol, font_size=14, font_family='Arial')
+        if fuel < 1:
+            pixi.draw_text('OUT OF FUEL',cx,cy,'white',font_size=20,font_family='Arial')
+    
+
+
+def maketerrain(x,y,x2,y2,pts):
+    endpoints = []
+    xmove = (x2-x)/(pts-1)
+    ymove = (y2-y)/(pts-1)
+    endpoints.append((x,y))
+    for i in range(round(pts-2)):
+        z=i+1
+        xpos = (x+xmove*z)+random.randint(-abs(round(xmove*0.3))-20,abs(round(xmove*1.8))+20)
+        ypos = (y+ymove*z)+random.randint(-abs(round(ymove*0.3))-20,abs(round(ymove*1.8))+20)
+        for zone in landingzones:
+            if not zone[0] < xpos < zone[0] +zone[2]:
+                endpoints.append((xpos,ypos))
+    endpoints.append((x2,y2))
+    return endpoints
+
+landflag = False
+lzmaxwidth = 200
+def update(dt_ms):
+    global time_ms, actors,landingzones,terrainpts
+    time_ms += dt_ms
+    
+    cx, cy = pixi.screen_center()
+    
+    # Handle events
+    if keyboard.pressed.n1:
+        pixisound.play('chords', 'c1')
+    elif keyboard.pressed.n2:
+        pixisound.play('chords', 'c2')
+    elif keyboard.pressed.n3:
+        pixisound.play('chords', 'c3')
+        
+    if fuel < 1 and not any(isinstance(i, Lander) for i in actors):
+        pixi.draw_text(f'Game Over! Score:{score}', cx,cy, 'white', font_size=20, font_family='Arial')
+    
+    if keyboard.pressed.space and not any(isinstance(i, Lander) for i in actors):
+        # Create a new lander
+        actors.append(Lander(cx, cy/2))
+        # Play a creation sound
+        pixisound.play('chords', 'c' + str(random.randint(1,3)))
+        landingzones.clear()
+        landingzones.append((random.randint(200,700),random.randint(350,600),random.randint(50,lzmaxwidth)))
+        terrainpts.clear()
+        w, h = pixi.screen_dimensions()
+
+        terrainlines.clear()
+        edgepoint = random.randint(round(h/2),round(h-(h/20)))
+        failedpts = 0
+        
+        terrainsegs = random.randint(15,30) 
+
+        terrainpts.extend(maketerrain(0,edgepoint,landingzones[0][0],landingzones[0][1],terrainsegs/(len(landingzones)+1)))
+        for i in range(len(landingzones)):
+            connectingptx = 0
+            connectingpty = 0
+            if i == len(landingzones)-1:
+                connectingptx = w
+                connectingpty = edgepoint
+            else:
+                connectingptx = landingzones[i+1][0]
+                connectingpty = landingzones[i+1][1]
+            terrainpts.extend(maketerrain(landingzones[i][0]+landingzones[i][2],landingzones[i][1],connectingptx,connectingpty,terrainsegs/(len(landingzones)+1)))
+        terrainpts.append((w,edgepoint))  
+        
+        terrainpts.sort()
+        for x in terrainpts:
+            if x[1] > h:
+                terrainpts[terrainpts.index(x)] = h - random.randint(20,100)
+        for i in range(len(terrainpts)-2):
+            terrainlines.append((terrainpts[i],terrainpts[i+1]))
+        stars.clear()
+        for ertwtewte in range(50,125):  
+            makestar = True
+            starx = random.randint(0,round(w))
+            stary = random.randint(0,round(h))
+    
+            for c in terrainlines:
+                if zak.lineintersect(starx,stary,starx+1,1,c[0][0],c[0][1],c[1][0],c[1][1]):
+                    makestar = False
+            if makestar:
+                stars.append((starx,stary))
+            
+        for i in landingzones:
+            if ((i[0],i[1]),(i[0]+i[2],i[1])) in terrainlines:
+                terrainlines.pop(terrainlines.index(((i[0],i[1]),(i[0]+i[2],i[1]))))
+        
+        
+            
+        
+
+  
+
+    # Update all actors, removing dead ones
+    actors = [a for a in actors if a.update(dt_ms)]
+    # update terrain points and landing zones into final terrain and collider  
+    
+
+        
+    
+    
+    keyboard.pressed.clear()
+        
+        
+    
+    
+
+totalt = 0
+def draw(dt_ms):
+    dt_s = dt_ms/1000
+    global totalt
+    global actors,score
+    totalt +=dt_s
+    w, h = pixi.screen_dimensions()
+    cx, cy = pixi.screen_center()
+    colours = ['white','yellow']
+
+    # Draw all actors
+    for a in actors:
+        a.draw()
+    for x in terrainlines:
+        pixi.draw_line(x[0][0],x[0][1],x[1][0],x[1][1],'gray',2)
+    for i in landingzones:
+        pixi.draw_line(i[0],i[1],i[0]+i[2],i[1],colours[round(totalt)%2],2)
+    for s in stars:
+        pixi.draw_line(s[0]+2,s[1]+2,s[0]-2,s[1]-2,'white',1)
+    for s in stars:
+        pixi.draw_line(s[0]+2,s[1]-2,s[0]-2,s[1]+2,'white',1)
+
+    
+        
+    
+
+
+    
+    # Draw the instructions
+    pixi.draw_text('Press spacebar to respawn the lander.  WASD to control.', cx, 20, 
+                   'white', font_size=14, font_family='Arial')
+    pixi.draw_text(f'Score: {score}', cx, 45, 
+                   'white', font_size=14, font_family='Arial')
+    if landed:
+        pixi.draw_text('Good Job!', cx, cy/3, 
+                   'white', font_size=20, font_family='Arial')
+        
+    
+    
+
+# Initialize sounds from a sound 'spritesheet' - single file containing multiple sounds
+pixisound.addsprites('chords', 'examples/sounds/melancholic-piano-chords-275668.mp3',
+                     {'c1': (0, 1.775),
+                      'c2': (1.775, 4.025),
+                      'c3': (4.025, 5.774)})
+
+# Initialize images from spritesheets
+#lander chunks:
+# 1 2
+# 3 4
+
+sprites = [('examples/images/lander.png', (240, 110), 
+            {'lander':         ( 0, 57, 22, 24),
+             'landerp1':       ( 0, 57, 11, 12),
+             'landerp2':       ( 11, 57, 11, 12),
+             'landerp3':       ( 0, 69, 11, 12),
+             'landerp4':       ( 11, 69, 11, 12),
+             'left_flame_1':   (22, 63, 3, 3),
+             'left_flame_2':   (44, 63, 3, 3),
+             'right_flame_1':  (41, 63, 3, 3),
+             'right_flame_2':  (63, 63, 3, 3),
+             'bottom_flame_1': (31, 77, 4, 4),
+             'bottom_flame_2': (53, 77, 4, 4),
+            }),
+          ]
+
+# Run checks
+zak.test_lineintersect()
+
+# Run the demo
+pixi.run(update, draw, 'black', 1920/1.5, 1080/1.5, sprites)
+</script>
+</body>
+</html>
