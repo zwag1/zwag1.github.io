@@ -1,0 +1,194 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+
+<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/brython@3.13.2/brython.min.js" crossorigin="anonymous"></script>
+<script> typeof __BRYTHON__ === "undefined" && document.write("<script src=\"brython.min.js\">\x3C/script>")</script>
+<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/brython@3.13.2/brython_stdlib.js" crossorigin="anonymous"></script>
+<script> typeof __BRYTHON__.use_VFS === "undefined" && document.write("<script src=\"brython_stdlib.js\">\x3C/script>")</script>
+
+
+<script type="text/javascript">
+function __brython_pre_then_code() {
+  brython({debug:1, ids:["brythonpre"]});
+}
+</script>
+</head>
+
+<body onload="__brython_pre_then_code()">
+<!-- Import pixi, with fallback to a local copy -->
+<script
+src="https://unpkg.com/pixi.js@8.9.2/dist/pixi.min.js">
+</script>
+<script>typeof PIXI === "undefined" && 
+    document.write('<script src="pixi.min.js">\x3C/script>')</script>
+
+<style>
+    body { margin: 0; 
+           overflow: hidden;
+         }
+</style>
+
+<script type="text/python" id="brythonpre">
+from browser import document, window
+
+import sys
+class __ErrorReporter:
+    def __init__(self):
+        self.errdiv = None
+    def write(self, msg):
+        if self.errdiv is None:
+            self.errdiv = document.createElement("div")
+            self.errdiv.style = "white-space: pre-wrap; font-family: monospace; color:red"
+            document.body.insertBefore(self.errdiv, document.body.firstChild)
+        self.errdiv.textContent += ("\n" + msg)
+sys.stderr = __ErrorReporter()
+
+# Load sound resouces
+window.SOUNDS = {}
+
+# Load image resources
+window.IMAGES = {'b2':'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAQCAYAAAAWGF8bAAABPklEQVQ4T2NkQAPR9nz/YUJLD35iRJcnxIdrOLJpEtig6b01DDuvsjG4a/9iQDZwa6wg3CKQOu/F77FaBhfcuaofrmHR1HqwQ9ANBBmCbDA2QzFs8TPj+8/LCfEYsoEeHh5wC3fs2IEzKIg2UEREBGygiYkJA14D0cMGW6Afk0lhOHv+MlyKJBfGOiBiefEBSCwjexfEJ8pAWHJhQgsEkKHoBor+OIYz9cC1I6c/kGqQwf+QEspbTiuwIcLfjzFw8/7CMPDrZzawGNhAmDd//WFkYGFGmPLnL4QPMwyfgSA5kKEoBiK7CNkJhFwHU4ti4MdvDAyw9AdSAHMdut+QvQvzJkgNSPz7F6gLQQLICRpniEM14pOHRwrIQJBCZFfi0ojNlTAxlERCrqGwCAEZijVPwgzG5zWQnIQYZvIBAEl8hz5Mnph2AAAAAElFTkSuQmCC',
+'b3':'data:image/bmp;base64,Qk2KBQAAAAAAAIoAAAB8AAAAFAAAABAAAAABACAAAwAAAAAFAAAAAAAAAAAAAAAAAAAAAAAAAAD/AAD/AAD/AAAAAAAA/0JHUnOPwvUoUbgeFR6F6wEzMzMTZmZmJmZmZgaZmZkJPQrXAyhcjzIAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAACExm/whMZv8ITGb/CExm/whMZv8ONk7/DjZO/w42Tv8ONk7/DjZO/w42Tv8ONk7/DjZO/w42Tv8ONk7/AAAAAAAAAAAAAAAAAAAAAAAAAAAITGb/Dj9b/whMZv8ITGb/CExm/whMZv8OP1v/Dj9b/w4/W/8OP1v/Dj9b/w4/W/8OP1v/Dj9b/w4/W/8ONk7/DjZO/wAAAAAAAAAAAAAAAAhMZv8ITGb/Dj9b/w4/W/8ITGb/CExm/whMZv8OP1v/Dj9b/w4/W/8OP1v/Dj9b/w4/W/8OP1v/Dj9b/w4/W/8ONk7/DjZO/wAAAAAAAAAACExm/whMZv8ITGb/CExm/whMZv8ITGb/CExm/whMZv8OP1v/Dj9b/w4/W/8OP1v/Dj9b/w4/W/8OP1v/Dj9b/w4/W/8ONk7/AAAAAAAAAAAOQF3/CExm/w4/W/8OP1v/Dj9b/whMZv8ITGb/CExm/w4/W/8OP1v/Dj9b/w4/W/8OP1v/DzxX/w4/W/8OP1v/Dj9b/w42Tv8OQF3/AAAAAA4/W/8ITGb/CExm/whMZv8ITGb/CExm/whMZv8ITGb/Dj9b/0hISP9ISEj/Dj9b/w4/W/8OP1v/Dj9b/w4/W/8OP1v/DkBd/w5AXf8AAAAADj9b/whMZv8ITGb/CExm/whMZv8ITGb/CExm/w4/W/9ISEj/SEhI/0hISP8OP1v/DzxX/w4/W/8OP1v/Dj9b/w88V/8OQF3/DkBd/wAAAAAOP1v/Dj9b/whMZv8ITGb/CExm/whMZv8ITGb/Dj9b/0hISP9ISEj/Dj9b/w4/W/8OP1v/DkBd/w4/W/8OP1v/Dj9b/w4/W/8AAAAAAAAAAA5AXf8OQF3/DkBd/w5AXf8OQF3/DkBd/w5AXf9ISEj/SEhI/0hISP9ISEj/AAAAAA5AXf8OQF3/DkBd/w5AXf8OP1v/Dj9b/wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEhISP9ISEj/SEhI/0hISP8AAAAAAAAAAA5AXf8OQF3/DkBd/wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASEhI/0hISP9ISEj/dXl7/7ZuAP+2bgD/tm4A/7ZuAP+2bgD/tm4A/7ZuAP+2bgD/tm4A/wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABISEj/FBQU/xQUFP8AAAAAAAAAAAAAAAAOP1v/Dj9b/w42Tv8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEhISP9ISEj/SEhI/wAAAAAAAAAAAAAAAA4/W/8OP1v/DjZO/wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALZuAP+2bgD/tm4A/wAAAAC2bgD/AAAAAAAAAAAAAAAADj9b/w4/W/+Pqrn/j6q5/4+quf8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALZuAP+2bgD/tm4A/7ZuAP8AAAAAAAAAAAAAAAAOP1v/FBQU/w4/W/+SssT/krLE/wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4/W/8OP1v/Dj9b/wAAAAAAAAAAAAAAAAAAAAA=',
+'b4':'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAQCAYAAAAWGF8bAAABTElEQVQ4T2NkIANE2/P9h2lbevATI7IRKBxkia2xgnBNIHHvxe/hakEG7rzKxuCu/Yshs7gFrM3GLw8sj9VAZMNABoH46AaCNMdlN8Ld4B5WiNtAmCoPDw+4K3fs2IHiQpCaz98ZGDadItLLIA0gA8+cOQM2/82bN9QxEOZaY0NdBqsncwhGIc5IgbkQ2QSYt2MdELG8+ACal5El0a1/zWGFIgQyEF39P2gow5IPIyxNcfP+wvDO189sDG85IYYKfz8Gl2cC+gtmEHp6BBuIzTCQQmQDYYb++cvIwMKMSKIgPhsLhA/yPl4D0Q1FdiWyd0AuhhsIChNOnl9g18AAsouRxWHy6K4EpUd+LqgL03w4ULIYekBiMxBdDXICZ4QZCNNIyHXYDAOJwXIM2ECQYegRQ6zLkA0DseEuRLb5xStEeGKkJSQB9HwMkgIAgAOiM5ikdgYAAAAASUVORK5CYIIA',
+'e':'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABoAAAAlCAYAAABcZvm2AAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAAWNJREFUeNrsV8sNwjAMbUqBBWACxB2pQ8AKcGALTsAJuDEFB1gBhuDAuWICmICPQh01pXWdJqEFcaglRGRbfonjPLuMc+5QwhjLGEJfZusjxZOL9akZKye9G98vPMfvsAx4qBfKwfzBL9s6uUHpI6U/u7+BKGkNb/H6umtk7MczF0HyfKS4zo/k/4AgTV8DOizrqX8oECgC+MGa8lGJp9sJDiAB8nyqYoglvJOPbP97IqoATGxWVZeXJlMQwYHA3piF8wJIblOVNBBxe3TPMLoHIKtxrbS7AAbBrA4Y5NaPAXf8LjN6wKZ0RaZOnlAFZnuXInVR4FTE6eYp0olPhhshtXsAwY3PquoAJNkIY33U7HTs7hYBwV24ItUKqDwgKF3VzAZ6k8HF+B1BMF8xRJbeJoqMXHZAAQ1kwoluURCdzepEugGEImBrIADB7I4lyfbJLlw92FKE6b5hVd+ktv4vAQYASMWxvlAAvcsAAAAASUVORK5CYII=',
+'bunny':'data:image/bmp;base64,Qk2KBQAAAAAAAIoAAAB8AAAAFAAAABAAAAABACAAAwAAAAAFAAAAAAAAAAAAAAAAAAAAAAAAAAD/AAD/AAD/AAAAAAAA/0JHUnOPwvUoUbgeFR6F6wEzMzMTZmZmJmZmZgaZmZkJPQrXAyhcjzIAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAONk7/DjZO/w42Tv8ONk7/DjZO/w42Tv8ONk7/DjZO/w42Tv8ONk7/CExm/whMZv8ITGb/CExm/whMZv8AAAAAAAAAAAAAAAAONk7/DjZO/w4/W/8OP1v/Dj9b/w4/W/8OP1v/Dj9b/w4/W/8OP1v/Dj9b/whMZv8ITGb/CExm/whMZv8OP1v/CExm/wAAAAAAAAAADjZO/w42Tv8OP1v/Dj9b/w4/W/8OP1v/Dj9b/w4/W/8OP1v/Dj9b/w4/W/8ITGb/CExm/whMZv8OP1v/Dj9b/whMZv8ITGb/AAAAAAAAAAAONk7/Dj9b/w4/W/8OP1v/Dj9b/w4/W/8OP1v/Dj9b/w4/W/8OP1v/CExm/whMZv8ITGb/CExm/whMZv8ITGb/CExm/whMZv8AAAAADkBd/w42Tv8OP1v/Dj9b/w4/W/8PPFf/Dj9b/w4/W/8OP1v/Dj9b/w4/W/8ITGb/CExm/whMZv8OP1v/Dj9b/w4/W/8ITGb/DkBd/wAAAAAOQF3/DkBd/w4/W/8OP1v/Dj9b/w4/W/8OP1v/Dj9b/0hISP9ISEj/Dj9b/whMZv8ITGb/CExm/whMZv8ITGb/CExm/whMZv8OP1v/AAAAAA5AXf8OQF3/DzxX/w4/W/8OP1v/Dj9b/w88V/8OP1v/SEhI/0hISP9ISEj/Dj9b/whMZv8ITGb/CExm/whMZv8ITGb/CExm/w4/W/8AAAAAAAAAAA4/W/8OP1v/Dj9b/w4/W/8OQF3/Dj9b/w4/W/8OP1v/SEhI/0hISP8OP1v/CExm/whMZv8ITGb/CExm/whMZv8OP1v/Dj9b/wAAAAAAAAAADj9b/w4/W/8OQF3/DkBd/w5AXf8OQF3/AAAAAEhISP9ISEj/SEhI/0hISP8OQF3/DkBd/w5AXf8OQF3/DkBd/w5AXf8OQF3/AAAAAAAAAAAAAAAAAAAAAA5AXf8OQF3/DkBd/wAAAAAAAAAASEhI/0hISP9ISEj/SEhI/wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC2bgD/tm4A/7ZuAP+2bgD/tm4A/7ZuAP+2bgD/tm4A/7ZuAP91eXv/SEhI/0hISP9ISEj/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAONk7/Dj9b/w4/W/8AAAAAAAAAAAAAAAAUFBT/FBQU/0hISP8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA42Tv8OP1v/Dj9b/wAAAAAAAAAAAAAAAEhISP9ISEj/SEhI/wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAI+quf+Pqrn/j6q5/w4/W/8OP1v/AAAAAAAAAAAAAAAAtm4A/wAAAAC2bgD/tm4A/7ZuAP8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAkrLE/5KyxP8OP1v/FBQU/w4/W/8AAAAAAAAAAAAAAAC2bgD/tm4A/7ZuAP+2bgD/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4/W/8OP1v/Dj9b/wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='}
+
+# Load modules - use runPythonSource as it is synchronous
+for module in []:
+    __BRYTHON__.runPythonSource(document[module].text, module.replace('__pwe_', ''))
+
+# Now run main code
+window.brython({'debug': 1, 'ids': ["pythoncode"]})
+</script>
+
+
+
+<script type="text/python" id="pythoncode">
+from browser import document, window, aio
+import random,math
+
+PIXI = window.PIXI
+
+
+def mousepos(app):
+    pos = app.renderer.events.pointer.getLocalPosition(app.stage)
+    return pos.x, pos.y
+
+
+async def main():
+    global texture,app
+    # Create a new application
+    app = PIXI.Application.new()
+    # Initialize the application
+    await app.init({"background": '#66ee66', "resizeTo": window})
+    # Append the application canvas to the document body
+    document.body.appendChild(app.canvas)
+
+    
+
+    # Create and add a container to the stage
+    container = PIXI.Container.new()
+    app.stage.addChild(container)
+    
+    style = {
+        'fontFamily': 'Arial',
+        'fontSize': 30,
+        'fill': 'black',
+        'fontWeight': 'normal'}
+    text_sprite = window.PIXI.Text.new('Happy Mother\'s day!\n I appreciate you.\nThank you for everything that you do to help me succeed and grow;\n it does not go unnoticed.\n\n Enjoy the birds, they are scared of the mouse.', style)
+    text_sprite.x = app.screen.width/2-220
+    text_sprite.y = app.screen.height/2-30
+    app.stage.addChild(text_sprite)    
+    # Load the bunny texture, using a remote address
+    # texture = await PIXI.Assets.load('https://pixijs.com/assets/bunny.png')
+
+    # Load the bunny texture, using the local image database
+    texture1 = await PIXI.Assets.load(window.IMAGES['bunny'])
+    texture2 = await PIXI.Assets.load(window.IMAGES['b2'])
+    texture3 = await PIXI.Assets.load(window.IMAGES['b3'])
+    texture4 = await PIXI.Assets.load(window.IMAGES['b4'])
+    textures = [texture1,texture2,texture3,texture4]
+    
+    birds = []
+    for i in range(100):
+        birds.append(Bird(random.randint(0,app.screen.width),
+                          random.randint(0,app.screen.height),
+                          texture1))
+
+    for i in birds:
+        app.stage.addChild(i.bird)
+
+   
+    
+    def animate(time):
+        for i in birds:
+            i.update()
+        
+    
+    app.ticker.add(animate)
+
+
+class Bird:
+    def __init__(self,x,y,tex):
+        global app
+        self.x = x
+        self.y = y
+        self.tx = x
+        self.panic = False
+        self.unease = False
+        self.ty = y
+        self.bird = PIXI.Sprite.new(tex)
+        self.bird.pivot.x = self.bird.width/2
+        self.bird.pivot.y = self.bird.height/2
+        
+    def update(self):
+        self.bird.x = self.x
+        self.bird.y = self.y
+        if self.unease:
+            self.bird.rotation = 0
+        self.mousex,self.mousey = mousepos(app)
+        self.mousedist = math.sqrt((self.x-self.mousex)**2+(self.y-self.mousey)**2)
+        if self.mousedist < 75 and self.panic == False:
+            self.tx = random.randint(0,app.screen.width)
+            self.ty = random.randint(0,app.screen.height)
+            self.panic = True
+        if self.mousedist > 150 and math.sqrt((self.x-self.tx)**2+(self.y-self.ty)**2) < 5:
+            self.panic = False
+        if self.mousedist < 225:
+            self.unease = True
+        if self.mousedist > 300:
+            self.unease = False
+            
+        if not self.unease and random.randint(0,10) == 0:
+            self.bird.rotation +=  random.triangular(-1,1)
+        if not self.unease and random.randint(0,10) == 0:
+            self.x += random.triangular(-10,10)
+            self.y += random.triangular(-10,10)
+        if (self.tx != self.x or self.ty != self.y) and self.panic:
+            if math.sqrt((self.x-self.tx)**2+(self.y-self.ty)**2) < 5:
+                self.x = self.tx
+                self.y = self.ty
+                self.panic = False
+                
+            else:
+                vl = math.sqrt((self.x-self.tx)**2+(self.y-self.ty)**2)
+                uvx = ((self.tx - self.x)/vl)*5
+                uvy = ((self.ty - self.y)/vl)*5
+                self.x += uvx
+                self.y += uvy
+
+    
+
+    
+        
+
+        
+
+
+# Start the async main function
+aio.run(main())
+</script>
+</body>
+</html>
